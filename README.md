@@ -179,6 +179,24 @@ Everything survives redeployments. The only risk is deleting the Railway service
 
 ---
 
+## Why Claude (not ChatGPT)
+
+KBboy uses Claude as its AI brain. Here's why:
+
+| | Claude | GPT-4o |
+|---|---|---|
+| Long context | Handles 200k tokens — remembers your full history | Shorter effective window, drifts on long prompts |
+| Instruction following | Reliably stays in persona and follows system prompt rules | More likely to break character or ignore nuanced instructions |
+| Tone & voice | Handles KBboy's HK voice, humor dial, and TARS references consistently | Tends to flatten personality over long conversations |
+| Best for | Conversation, memory, personality | Structured tasks, function calling |
+
+KBboy gets the best of both worlds:
+- **Claude Sonnet** — all conversation, image reading, memory summarisation
+- **Claude Haiku** — proactive messages (faster, cheaper)
+- **OpenAI TTS (`nova` voice)** — audio replies only
+
+---
+
 ## Google Calendar (optional)
 
 Connects KBboy to your real live calendar instead of a static JSON file.
