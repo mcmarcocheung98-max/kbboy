@@ -1,0 +1,13 @@
+node_modules/
+
+# Sensitive — never commit
+.env
+tokens.json
+
+# Runtime data — lives on Railway persistent volume
+kbboy.db
+config.json
+memory/
+
+# macOS
+.DS_Store
