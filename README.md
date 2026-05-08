@@ -18,6 +18,7 @@ KBboy messages you throughout the day on a schedule:
 | 8:20 AM | Leave for work reminder (work days only) |
 | 12:30 PM | Buddy midday walk |
 | 12:00 / 16:00 | Random check-in, hot take, or cultural reference |
+| Routine time | Nudge if routine is still pending at its scheduled time |
 | Pre-event (1hr) | Calendar event heads up |
 | 6:00 PM | Buddy dinner |
 | 6:30 PM | Gym check-in (gym days only) |
@@ -26,14 +27,39 @@ KBboy messages you throughout the day on a schedule:
 | 9:00 PM | Evening skincare reminder |
 | 10:30 PM | Wind down + sleep nudge |
 | Sunday 8:00 PM | Weekly report card |
+| Any time | Reminder fires at the exact minute you set it |
 
-All messages respect your **sleep window** (default 11 PM–7 AM) and a **daily message cap** (default 10/day).
+All messages respect your **sleep window** (default 11 PM–7 AM) and a **daily message cap** (default 10/day). Reminders and routine nudges bypass the daily cap — they're intentional.
 
 ### Reactive — answers anything
 - Ask about your day, routines, calendar, diet, gym, skincare, commute, dog
 - Send a photo — KBboy sees it and reacts in his voice
 - Full conversation history (last 20 turns) gives context to every reply
 - Long-term topic memory means he remembers things across days and weeks
+
+### Routines — track daily habits
+Set up recurring habits with optional times and day schedules. KBboy nudges you when it's time and tracks your streak.
+
+```
+/routine                        → today's status with tap-to-mark buttons
+/routine add 🏋 Gym 06:30 weekdays
+/routine add 💊 Vitamins        → daily, no time
+/routine done Gym               → mark done by name
+/routine skip Vitamins          → mark skipped
+/routine streak                 → 🔥 streak counts
+/routine all                    → full list
+/routine remove Gym             → delete
+```
+
+### Reminders — one-shot push notifications
+Natural language time parsing, fires to the minute:
+
+```
+/remind in 30min take meds
+/remind 9pm call mom
+/remind tomorrow 9am dentist appointment
+/remind in 2h check oven
+```
 
 ### Memory — knows your history
 Every conversation is classified by topic and summarised into a persistent log:
@@ -139,7 +165,7 @@ Then message your bot `/start` on Telegram.
 The persistent volume at `/data` stores:
 ```
 /data/
-  kbboy.db       ← conversation history, settings, humor level
+  kbboy.db       ← conversation history, routines, reminders, settings
   config.json    ← your profile (written during onboarding)
   tokens.json    ← Google Calendar tokens
   memory/
@@ -196,14 +222,19 @@ Voice is automatically stripped of markdown before synthesis. Responses longer t
 |---|---|
 | `/start` | Begin onboarding (first time only) |
 | `/help` | Show all commands |
+| **Routines** | |
+| `/routine` | Today's status with quick tap buttons |
+| `/routine add [emoji] name [HH:MM] [days]` | Add a routine |
+| `/routine done [name]` | Mark a routine done |
+| `/routine skip [name]` | Mark a routine skipped |
+| `/routine streak` | Streak counts per routine |
+| `/routine all` | All routines and their schedules |
+| `/routine remove [name]` | Delete a routine |
+| **Reminders** | |
+| `/remind [time] [message]` | One-shot reminder (fires to the minute) |
+| **Settings** | |
 | `/humor [0-100]` | Adjust humor dial |
 | `/voice on\|off` | Toggle voice replies (needs `OPENAI_API_KEY`) |
-| `/today` | Regenerate today's brief |
-| `/calendar` | Show events for next 14 days |
-| `/report` | Weekly report card with grades |
-| `/memory` | List all active topic logs |
-| `/backup` | DM yourself all memory logs |
-| `/forget [topic]` | Wipe a topic log (fresh start) |
 | `/quiet [Xh]` | Quiet mode for X hours |
 | `/dnd` | Do not disturb until 7 AM tomorrow |
 | `/pause` | Pause all proactive messages |
@@ -212,6 +243,13 @@ Voice is automatically stripped of markdown before synthesis. Responses longer t
 | `/mute buddy [Xh]` | Pause dog reminders |
 | `/timezone [city]` | Update your timezone |
 | `/update` | Re-run onboarding to change your settings |
+| **Info** | |
+| `/today` | Regenerate today's brief |
+| `/calendar` | Show events for next 14 days |
+| `/report` | Weekly report card with grades |
+| `/memory` | List all active topic logs |
+| `/backup` | DM yourself all memory logs |
+| `/forget [topic]` | Wipe a topic log (fresh start) |
 
 ---
 
@@ -251,13 +289,32 @@ Topic summary saved to memory/[topic].md
 
 Topic detection uses keyword matching across 13 built-in topics. New topics are auto-detected and created when you talk about something new.
 
+### Routine + reminder system
+
+| Component | How it works |
+|---|---|
+| Routines | Stored in SQLite with name, emoji, time, days schedule |
+| Completion | Logged per day as done / skipped / pending |
+| Streaks | Counted backward from today through consecutive done days |
+| Nudges | Cron checks every minute — fires at exact routine time if still pending |
+| Reminders | Stored with ISO fire_at timestamp, poller fires within 1 minute |
+| Quick buttons | `/routine` shows Telegram inline keyboard for one-tap check-off |
+
+---
+
+## Known Limitations
+
+- **Timezone:** The server runs in UTC (Railway default). All scheduled messages and reminder times are interpreted in UTC, not your local timezone. If you're in HK (+8), set times 8 hours earlier than you actually want them. A proper timezone offset fix is planned.
+- **Streak counter:** Only accurate for daily routines. Routines scheduled on specific days (e.g. Mon/Wed/Fri) will show streak=0 due to the gap between log dates. Fix planned.
+- **Cron times are fixed at startup:** Changing your morning brief time or dog feeding schedule via `/update` requires restarting the Railway service to take effect. Settings like humor level, sleep window, quiet mode, and pause update instantly.
+
 ---
 
 ## File Structure
 
 ```
 kbboy/
-├── telegram.js          main bot — message routing, photo/voice handling
+├── telegram.js          main bot — message routing, photo/voice, inline buttons
 ├── setup-calendar.js    one-time Google Calendar OAuth
 ├── kbboy-persona.md     KBboy's personality, voice, and humor examples
 ├── railway.json         Railway deployment config
@@ -265,13 +322,14 @@ kbboy/
 ├── .env.example         env var template
 └── src/
     ├── paths.js         DATA_DIR abstraction (local vs Railway)
-    ├── db.js            SQLite via node:sqlite (no native deps)
+    ├── db.js            SQLite via node:sqlite — all tables and queries
+    ├── routines.js      routine formatting, day parsing, reminder time parsing
     ├── memory.js        topic log read/write + keyword detection
     ├── gcal.js          Google Calendar API wrapper
     ├── claude.js        AI brain — chat, vision, proactive, memory summary
     ├── voice.js         OpenAI TTS → Telegram voice message
     ├── onboarding.js    conversational setup flow
-    ├── scheduler.js     node-cron proactive message jobs
+    ├── scheduler.js     node-cron proactive + reminder poller + routine nudges
     └── commands.js      all /command handlers
 ```
 
@@ -289,3 +347,23 @@ kbboy/
 | **Total** | | **~$16–23/month** |
 
 Claude API breakdown: ~30 conversations/day × 30 days, ~3k tokens input + ~500 tokens output per message. Proactive messages use the cheaper Haiku model.
+
+---
+
+## Multi-User Readiness
+
+KBboy is currently **single-user** by design (one `TELEGRAM_ALLOWED_ID`, one database, one config). The architecture needed to support multiple users is documented here for when that work begins:
+
+**What needs to change:**
+
+| Component | Current | Multi-user |
+|---|---|---|
+| Auth | One hardcoded `TELEGRAM_ALLOWED_ID` | Allowlist table in DB, admin-managed |
+| Database tables | No `user_id` column | Add `chat_id` to messages, routines, routine_logs, reminders, state |
+| Config | Single `config.json` | Per-user `config/{chat_id}.json` or users table |
+| Memory logs | `memory/gym.md` | `memory/{chat_id}/gym.md` |
+| Google Calendar | Single `tokens.json` | Per-user token storage |
+| Scheduler | One `setupScheduler(bot, chatId)` call | One scheduler per active user |
+| State keys | Flat: `humor_level`, `paused` | Namespaced: `{chatId}:humor_level` or user_id foreign key |
+
+The SQLite schema is the deepest refactor — every query needs a `WHERE chat_id = ?` clause added. Everything else is relatively mechanical once that's done.
