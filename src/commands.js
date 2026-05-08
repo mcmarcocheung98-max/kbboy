@@ -1,4 +1,10 @@
-import { setHumorLevel, getHumorLevel, setQuietUntil, setPaused, setState, getState } from './db.js';
+import { Markup } from 'telegraf';
+import {
+  setHumorLevel, getHumorLevel, setQuietUntil, setPaused, setState, getState,
+  getAllRoutines, getRoutineByName, addRoutine, removeRoutine, logRoutine,
+  getTodayRoutineLogs, addReminder,
+} from './db.js';
+import { parseDays, formatTodayRoutines, formatAllRoutines, formatStreaks, parseReminderTime, formatReminderTime, isDueToday } from './routines.js';
 import { wipeTopic, listTopics, readLog } from './memory.js';
 import { getTodayEvents, getUpcomingEvents } from './gcal.js';
 import { generateProactiveMessage } from './claude.js';
@@ -27,22 +33,28 @@ export async function handleCommand(ctx, command, args) {
     case 'help':
       return ctx.reply(
         `*KBboy Commands*\n\n` +
-        `/humor [0-100] — set humor dial (currently ${getHumorLevel()}/100)\n` +
-        `/voice on|off — toggle voice replies${isVoiceAvailable() ? '' : ' (needs OPENAI_API_KEY)'}\n` +
+        `*Routines & Reminders*\n` +
+        `/routine — today's status\n` +
+        `/routine add [emoji] name [time] [days] — add routine\n` +
+        `/routine streak — streak counts\n` +
+        `/remind [time] [message] — one-shot reminder\n\n` +
+        `*Settings*\n` +
+        `/humor [0-100] — humor dial (currently ${getHumorLevel()}/100)\n` +
+        `/voice on|off — voice replies${isVoiceAvailable() ? '' : ' (needs OPENAI_API_KEY)'}\n` +
         `/quiet [1-24]h — quiet mode for N hours\n` +
-        `/dnd — do not disturb until tomorrow morning\n` +
-        `/pause — pause all messages\n` +
-        `/resume — resume messages\n` +
-        `/sleep [HH:MM] [HH:MM] — update sleep window\n` +
+        `/dnd — do not disturb until tomorrow 7am\n` +
+        `/pause / /resume — toggle proactive messages\n` +
+        `/sleep HH:MM HH:MM — update sleep window\n` +
         `/mute buddy [Xh] — pause dog reminders\n` +
-        `/calendar — show upcoming events\n` +
+        `/timezone [city] — update timezone\n\n` +
+        `*Info*\n` +
+        `/calendar — upcoming events\n` +
         `/today — today's brief\n` +
         `/report — weekly report card\n` +
-        `/memory — list all topic logs\n` +
-        `/backup — get all memory logs as a message\n` +
+        `/memory — topic logs\n` +
+        `/backup — all memory logs\n` +
         `/forget [topic] — wipe a topic log\n` +
-        `/update — re-run onboarding to update your settings\n` +
-        `/timezone [city] — update timezone\n`,
+        `/update — redo onboarding\n`,
         { parse_mode: 'Markdown' }
       );
 
@@ -204,6 +216,129 @@ export async function handleCommand(ctx, command, args) {
       config.profile.timezone = city;
       saveConfig(config);
       return ctx.reply(`Timezone updated to ${city}.`);
+    }
+
+    case 'routine': {
+      const sub = args[0]?.toLowerCase();
+
+      if (!sub || sub === 'list') {
+        const logs = getTodayRoutineLogs();
+        const due = logs.filter(r => isDueToday(r));
+        const pending = due.filter(r => r.status === 'pending');
+        const keyboard = pending.length
+          ? Markup.inlineKeyboard(pending.map(r => [
+              Markup.button.callback(`✅ ${r.name}`, `routine_done:${r.id}`),
+              Markup.button.callback(`⏭ Skip`, `routine_skip:${r.id}`),
+            ]))
+          : {};
+        return ctx.reply(formatTodayRoutines(logs), { parse_mode: 'Markdown', ...keyboard });
+      }
+
+      if (sub === 'all') {
+        const routines = getAllRoutines();
+        return ctx.reply(formatAllRoutines(routines), { parse_mode: 'Markdown' });
+      }
+
+      if (sub === 'streak' || sub === 'streaks') {
+        const routines = getAllRoutines();
+        return ctx.reply(formatStreaks(routines), { parse_mode: 'Markdown' });
+      }
+
+      if (sub === 'add') {
+        const rest = args.slice(1);
+        let emoji = '✅', startIdx = 0;
+        if (rest[0] && /^\p{Emoji}/u.test(rest[0])) { emoji = rest[0]; startIdx = 1; }
+
+        const timeIdx = rest.findIndex((a, i) => i >= startIdx && /^\d{1,2}:\d{2}$/.test(a));
+        const daysIdx = rest.findIndex((a, i) => i >= startIdx && /^(daily|weekdays|weekends|mon|tue|wed|thu|fri|sat|sun)/i.test(a));
+
+        const nameEnd = Math.min(
+          timeIdx >= 0 ? timeIdx : rest.length,
+          daysIdx >= 0 ? daysIdx : rest.length,
+        );
+        const routineName = rest.slice(startIdx, nameEnd).join(' ');
+        if (!routineName) return ctx.reply('Usage: /routine add [emoji] name [HH:MM] [days]\nExample: /routine add 🏋 Gym 06:30 weekdays');
+
+        const time = timeIdx >= 0 ? rest[timeIdx] : null;
+        const days = daysIdx >= 0 ? parseDays(rest.slice(daysIdx).join(' ')) : 'daily';
+
+        addRoutine({ name: routineName, emoji, time, days });
+        return ctx.reply(
+          `Added ${emoji} *${routineName}*${time ? ' at ' + time : ''}  _${days === 'daily' ? 'every day' : days}_`,
+          { parse_mode: 'Markdown' }
+        );
+      }
+
+      if (sub === 'done') {
+        const routineName = args.slice(1).join(' ');
+        if (!routineName) return ctx.reply('Usage: /routine done [name]');
+        const routine = getRoutineByName(routineName);
+        if (!routine) return ctx.reply(`No routine found matching "${routineName}"`);
+        logRoutine(routine.id, 'done');
+        return ctx.reply(`${routine.emoji} *${routine.name}* — done ✅`, { parse_mode: 'Markdown' });
+      }
+
+      if (sub === 'skip') {
+        const routineName = args.slice(1).join(' ');
+        if (!routineName) return ctx.reply('Usage: /routine skip [name]');
+        const routine = getRoutineByName(routineName);
+        if (!routine) return ctx.reply(`No routine found matching "${routineName}"`);
+        logRoutine(routine.id, 'skipped');
+        return ctx.reply(`${routine.emoji} *${routine.name}* — skipped ⏭`, { parse_mode: 'Markdown' });
+      }
+
+      if (sub === 'remove' || sub === 'delete') {
+        const routineName = args.slice(1).join(' ');
+        if (!routineName) return ctx.reply('Usage: /routine remove [name]');
+        const routine = getRoutineByName(routineName);
+        if (!routine) return ctx.reply(`No routine found matching "${routineName}"`);
+        removeRoutine(routine.id);
+        return ctx.reply(`Removed ${routine.emoji} *${routine.name}*.`, { parse_mode: 'Markdown' });
+      }
+
+      return ctx.reply(
+        `*Routine Commands*\n\n` +
+        `/routine — today's status (with quick buttons)\n` +
+        `/routine all — all routines\n` +
+        `/routine streak — streak counts\n` +
+        `/routine add [emoji] name [HH:MM] [days] — add new\n` +
+        `/routine done [name] — mark done\n` +
+        `/routine skip [name] — mark skipped\n` +
+        `/routine remove [name] — delete`,
+        { parse_mode: 'Markdown' }
+      );
+    }
+
+    case 'remind': {
+      if (!args.length) {
+        return ctx.reply(
+          'Usage: /remind [time] [message]\n\nExamples:\n' +
+          '/remind in 30min take meds\n' +
+          '/remind 9pm call mom\n' +
+          '/remind tomorrow 9am dentist appointment'
+        );
+      }
+
+      let fireAt = null, messageStart = 1;
+
+      if (args[0].toLowerCase() === 'in' && args[1]) {
+        fireAt = parseReminderTime(`in ${args[1]}`);
+        messageStart = 2;
+      } else if (args[0].toLowerCase() === 'tomorrow' && args[1]) {
+        fireAt = parseReminderTime(`tomorrow ${args[1]}`);
+        messageStart = 2;
+      } else {
+        fireAt = parseReminderTime(args[0]);
+        messageStart = 1;
+      }
+
+      if (!fireAt) return ctx.reply(`Couldn't parse that time. Try:\n/remind in 30min [message]\n/remind 9pm [message]\n/remind tomorrow 9am [message]`);
+
+      const message = args.slice(messageStart).join(' ');
+      if (!message) return ctx.reply('Need a message after the time.\nExample: /remind in 30min take meds');
+
+      addReminder({ message, fireAt });
+      return ctx.reply(`⏰ Reminder set — ${formatReminderTime(fireAt)}\n"${message}"`);
     }
 
     default:

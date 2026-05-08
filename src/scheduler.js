@@ -1,7 +1,8 @@
 import cron from 'node-cron';
 import { getTodayEvents, getUpcomingEvents } from './gcal.js';
 import { generateProactiveMessage } from './claude.js';
-import { getTodayCount, incrementCount, getHumorLevel, getQuietUntil, isPaused } from './db.js';
+import { getTodayCount, incrementCount, getHumorLevel, getQuietUntil, isPaused, getPendingReminders, markReminderSent, getTodayRoutineLogs } from './db.js';
+import { isDueToday } from './routines.js';
 import { readFileSync, existsSync } from 'fs';
 import { CONFIG_PATH } from './paths.js';
 
@@ -177,6 +178,44 @@ export function setupScheduler(bot, chatId) {
     for (const d of dates) {
       if (d.daysUntil <= 5) {
         await send(bot, chatId, 'important_date', cfg, `${d.label} is ${d.daysUntil === 0 ? 'TODAY' : 'in ' + d.daysUntil + ' day(s)'}.`);
+      }
+    }
+  });
+
+  // Reminder poller — fires every minute, sends any overdue reminders immediately
+  // Not gated behind canSend() — user explicitly set these
+  cron.schedule('* * * * *', async () => {
+    const pending = getPendingReminders();
+    for (const r of pending) {
+      try {
+        const prefix = r.urgent ? '🚨 *URGENT*\n' : '⏰ ';
+        await bot.telegram.sendMessage(chatId, `${prefix}${r.message}`, { parse_mode: 'Markdown' });
+        markReminderSent(r.id);
+      } catch (err) {
+        console.error('[reminder] Error:', err.message);
+      }
+    }
+  });
+
+  // Routine nudge checker — every minute, nudge if routine time matches now and still pending
+  cron.schedule('* * * * *', async () => {
+    const cfg = loadConfig();
+    if (isInSleepWindow(cfg)) return;
+
+    const now = new Date();
+    const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+    const logs = getTodayRoutineLogs();
+    for (const r of logs) {
+      if (r.time === currentTime && r.status === 'pending' && isDueToday(r)) {
+        try {
+          await bot.telegram.sendMessage(chatId,
+            `${r.emoji} *${r.name}* time!\n\nReply /routine done ${r.name} when done, or /routine skip ${r.name}.`,
+            { parse_mode: 'Markdown' }
+          );
+        } catch (err) {
+          console.error('[routine nudge] Error:', err.message);
+        }
       }
     }
   });

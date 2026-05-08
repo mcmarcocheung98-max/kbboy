@@ -1,4 +1,4 @@
-import { Telegraf } from 'telegraf';
+import { Telegraf, Markup } from 'telegraf';
 import dotenv from 'dotenv';
 import { existsSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
@@ -11,7 +11,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 import {
   isOnboarded, getHumorLevel, addMessage,
   getRecentMessages, incrementCount, getState, setState,
+  logRoutine, getRoutineById, getTodayRoutineLogs,
 } from './src/db.js';
+import { isDueToday, formatTodayRoutines } from './src/routines.js';
 import { detectTopic, appendToLog, topicExists, createTopic, readLog, KNOWN_TOPICS } from './src/memory.js';
 import { chat, chatWithImage, summariseForMemory } from './src/claude.js';
 import { handleOnboarding } from './src/onboarding.js';
@@ -208,6 +210,34 @@ bot.on('document', async (ctx) => {
     console.error('[document] Error:', err.message);
     await ctx.reply(`Couldn't read that image. Try again?`);
   }
+});
+
+// ── Inline keyboard — routine quick check-off ─────────────────────
+bot.action(/^routine_(done|skip):(\d+)$/, async (ctx) => {
+  const action = ctx.match[1];
+  const id     = parseInt(ctx.match[2]);
+  const status = action === 'done' ? 'done' : 'skipped';
+
+  logRoutine(id, status);
+  const routine = getRoutineById(id);
+  const icon    = status === 'done' ? '✅' : '⏭';
+  await ctx.answerCbQuery(`${icon} ${routine?.name || 'Routine'} marked ${status}`);
+
+  const logs    = getTodayRoutineLogs();
+  const text    = formatTodayRoutines(logs);
+  const due     = logs.filter(r => isDueToday(r));
+  const pending = due.filter(r => r.status === 'pending');
+
+  const keyboard = pending.length
+    ? Markup.inlineKeyboard(pending.map(r => [
+        Markup.button.callback(`✅ ${r.name}`, `routine_done:${r.id}`),
+        Markup.button.callback(`⏭ Skip`, `routine_skip:${r.id}`),
+      ]))
+    : {};
+
+  try {
+    await ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
+  } catch {}
 });
 
 // Graceful shutdown
