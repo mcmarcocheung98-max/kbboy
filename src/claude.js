@@ -179,4 +179,35 @@ ${systemContext}`,
   return response.content[0].text;
 }
 
+export async function chatWithImage({ imageBase64, mimeType = 'image/jpeg', caption, history, config, humorLevel, todayEvents, upcomingEvents, upcomingDates }) {
+  const contextBlock = buildContextBlock(config, todayEvents, upcomingEvents, upcomingDates, null, null);
+  const systemPrompt = buildSystemPrompt(config, humorLevel, contextBlock);
+
+  const messages = [
+    ...history,
+    {
+      role: 'user',
+      content: [
+        {
+          type: 'image',
+          source: { type: 'base64', media_type: mimeType, data: imageBase64 },
+        },
+        {
+          type: 'text',
+          text: caption || 'What do you see? React in KBboy voice.',
+        },
+      ],
+    },
+  ];
+
+  const response = await client.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 1024,
+    system: systemPrompt,
+    messages,
+  });
+
+  return response.content[0].text;
+}
+
 export { buildContextBlock, buildSystemPrompt };

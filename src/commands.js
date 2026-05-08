@@ -2,6 +2,7 @@ import { setHumorLevel, getHumorLevel, setQuietUntil, setPaused, setState, getSt
 import { wipeTopic, listTopics, readLog } from './memory.js';
 import { getTodayEvents, getUpcomingEvents } from './gcal.js';
 import { generateProactiveMessage } from './claude.js';
+import { isVoiceAvailable } from './voice.js';
 import { readFileSync, existsSync, writeFileSync } from 'fs';
 import { CONFIG_PATH } from './paths.js';
 
@@ -27,6 +28,7 @@ export async function handleCommand(ctx, command, args) {
       return ctx.reply(
         `*KBboy Commands*\n\n` +
         `/humor [0-100] — set humor dial (currently ${getHumorLevel()}/100)\n` +
+        `/voice on|off — toggle voice replies${isVoiceAvailable() ? '' : ' (needs OPENAI_API_KEY)'}\n` +
         `/quiet [1-24]h — quiet mode for N hours\n` +
         `/dnd — do not disturb until tomorrow morning\n` +
         `/pause — pause all messages\n` +
@@ -37,11 +39,47 @@ export async function handleCommand(ctx, command, args) {
         `/today — today's brief\n` +
         `/report — weekly report card\n` +
         `/memory — list all topic logs\n` +
+        `/backup — get all memory logs as a message\n` +
         `/forget [topic] — wipe a topic log\n` +
         `/update — re-run onboarding to update your settings\n` +
         `/timezone [city] — update timezone\n`,
         { parse_mode: 'Markdown' }
       );
+
+    case 'voice': {
+      if (!isVoiceAvailable()) {
+        return ctx.reply(`Voice replies need OPENAI_API_KEY set in your Railway env vars.\nAdd it and redeploy — then /voice on will work.`);
+      }
+      const setting = args[0]?.toLowerCase();
+      if (setting === 'on') {
+        setState('voice_enabled', true);
+        return ctx.reply(`Voice on. I'll send audio replies from now on la.`);
+      }
+      if (setting === 'off') {
+        setState('voice_enabled', false);
+        return ctx.reply(`Voice off. Text only.`);
+      }
+      const current = getState('voice_enabled', false);
+      return ctx.reply(`Voice is currently ${current ? 'ON' : 'OFF'}.\nUse /voice on or /voice off.`);
+    }
+
+    case 'backup': {
+      const topics = listTopics();
+      if (!topics.length) return ctx.reply('No memory logs yet.');
+      let backup = `*KBboy Memory Backup*\n\n`;
+      for (const topic of topics) {
+        const log = readLog(topic, 10);
+        if (log) backup += `*${topic.toUpperCase()}*\n${log}\n\n`;
+      }
+      // Split if too long for Telegram (4096 char limit)
+      if (backup.length <= 4000) {
+        return ctx.reply(backup, { parse_mode: 'Markdown' });
+      }
+      // Send in chunks
+      const chunks = backup.match(/.{1,4000}/gs) || [];
+      for (const chunk of chunks) await ctx.reply(chunk, { parse_mode: 'Markdown' });
+      return;
+    }
 
     case 'humor': {
       const level = parseInt(args[0]);
