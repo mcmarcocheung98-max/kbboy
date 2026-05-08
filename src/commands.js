@@ -341,6 +341,15 @@ export async function handleCommand(ctx, command, args) {
       return ctx.reply(`⏰ Reminder set — ${formatReminderTime(fireAt)}\n"${message}"`);
     }
 
+    case 'fixsetup': {
+      const cfg = loadConfig();
+      if (!cfg.profile?.name) {
+        return ctx.reply(`config.json is missing or empty — can't restore. You'll need to run /start once to rebuild it. Sorry la.`);
+      }
+      setState('onboarded', true);
+      return ctx.reply(`Fixed. You're marked as set up again, ${cfg.profile.name}. Try sending a photo now.`);
+    }
+
     default:
       return ctx.reply(`Unknown command. Type /help to see what I can do.`);
   }
