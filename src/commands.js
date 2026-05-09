@@ -346,14 +346,13 @@ export async function handleCommand(ctx, command, args) {
       const configExists = existsSync(CONFIG_PATH);
       const onboarded    = getState('onboarded', false);
       return ctx.reply(
-        `*Debug Info*\n\n` +
+        `Debug Info\n\n` +
         `DATA_DIR: ${process.env.DATA_DIR || '(not set)'}\n` +
         `DB path: ${DB_PATH}\n` +
         `DB exists: ${dbExists}\n` +
         `Config exists: ${configExists}\n` +
         `Onboarded: ${onboarded}\n` +
-        `Node: ${process.version}`,
-        { parse_mode: 'Markdown' }
+        `Node: ${process.version}`
       );
     }
 
