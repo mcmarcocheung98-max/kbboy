@@ -141,7 +141,12 @@ bot.on('text', async (ctx) => {
     }
 
     if (command === 'help' && !isOnboarded()) return ctx.reply(`Not set up yet. Send /start to begin.`);
-    return handleCommand(ctx, command, args);
+    try {
+      return await handleCommand(ctx, command, args);
+    } catch (err) {
+      console.error('[command] Error:', err.message, err.stack);
+      return ctx.reply(`Command error: ${err.message}`);
+    }
   }
 
   // Onboarding
