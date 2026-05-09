@@ -10,7 +10,7 @@ import { getTodayEvents, getUpcomingEvents } from './gcal.js';
 import { generateProactiveMessage } from './claude.js';
 import { isVoiceAvailable } from './voice.js';
 import { readFileSync, existsSync, writeFileSync } from 'fs';
-import { CONFIG_PATH } from './paths.js';
+import { CONFIG_PATH, DB_PATH, MEMORY_DIR } from './paths.js';
 
 function loadConfig() {
   return existsSync(CONFIG_PATH) ? JSON.parse(readFileSync(CONFIG_PATH, 'utf8')) : {};
@@ -342,14 +342,13 @@ export async function handleCommand(ctx, command, args) {
     }
 
     case 'debug': {
-      const { DB_PATH, CONFIG_PATH, MEMORY_DIR } = await import('./paths.js');
       const dbExists     = existsSync(DB_PATH);
       const configExists = existsSync(CONFIG_PATH);
       const onboarded    = getState('onboarded', false);
       return ctx.reply(
         `*Debug Info*\n\n` +
-        `DATA_DIR: \`${process.env.DATA_DIR || '(not set)'}\`\n` +
-        `DB path: \`${DB_PATH}\`\n` +
+        `DATA_DIR: ${process.env.DATA_DIR || '(not set)'}\n` +
+        `DB path: ${DB_PATH}\n` +
         `DB exists: ${dbExists}\n` +
         `Config exists: ${configExists}\n` +
         `Onboarded: ${onboarded}\n` +
