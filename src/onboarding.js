@@ -153,9 +153,13 @@ async function extractAnswer(stepKey, text, data) {
 async function finalise(data) {
   // Build and write config.json from collected data
   const config = buildConfig(data);
-  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
   setState('onboarded', true);
   setState('humor_level', data.humor_level ?? 75);
+  try {
+    writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+  } catch (err) {
+    console.error('[onboarding] Failed to write config.json:', err.message);
+  }
 
   return {
     reply: `Aight ${data.name || 'Marco'}, you're all set up. KBboy is live 🤙\n\nHumor: ${data.humor_level ?? 75}/100. Morning brief at ${data.brief_time || '7:00 AM'}.\n\nType anything to start, or /help to see what I can do.`,
